@@ -1,221 +1,299 @@
-# ROS_Gazebo_based_simulations
- This is a an attempt to perform Ros2- Gazebo based simulations to test algorithms like A* and GVD for path generation and following the bot over a custom environment / world
- 
-# ROS2 Dual-Planner Navigation System  
-## Comparative Implementation of A* and Generalized Voronoi Diagram (GVD)
+# Dual-Planner Autonomous Navigation System (ROS2)
+
+## A Structured Implementation of A* and Medial-Axis (GVD) Planning in Simulation
 
 ---
 
-## 1. Introduction
+## 1. Overview
 
-This project presents a complete dual-planner navigation framework built in ROS2 (Humble), designed to compare two fundamentally different path-planning philosophies:
+This project presents a structured development of a complete autonomous navigation stack in ROS2, built in progressive stages:
 
-- **A*** — Optimal shortest-path planning
-- **GVD (Generalized Voronoi Diagram)** — Safety-oriented medial axis planning
+1. Simulation Environment & Mapping (Digital Twin Creation)
+2. Configuration Space Modeling
+3. Dual Planner Implementation (A* and GVD)
+4. Planner-Specific Path Following
 
-The objective of this work was to investigate the trade-off between **optimality and safety** in autonomous mobile robot navigation and to implement both planners from scratch within a unified ROS2 simulation environment.
+The system is designed to investigate the trade-off between:
 
-The system was tested in Gazebo using a TurtleBot3 model with occupancy grid maps served via `nav2_map_server`.
+- **Optimality (Shortest Path Planning)**
+- **Safety (Maximum Clearance Planning)**
 
----
-
-## 2. Motivation
-
-In autonomous navigation, shortest path planning is often not the safest strategy in cluttered environments. While A* guarantees optimality in path length, it may pass dangerously close to obstacles.
-
-In contrast, GVD generates paths that maximize clearance by following the medial axis of free space. Although longer in distance, these paths improve robustness in narrow corridors and constrained environments.
-
-This project was designed to:
-
-- Implement both planners independently
-- Build appropriate path-following controllers for each
-- Compare behavioral differences in simulation
-- Understand controller-planner coupling effects
+The implementation is fully modular and runs in ROS2 Humble using Gazebo and TurtleBot3 simulation.
 
 ---
 
-## 3. System Architecture
+## 2. Phase I — Environment & Digital Twin Construction
 
-The system follows a modular ROS2 architecture:
+### 2.1 Simulation Environment Setup
 
-Map Server → Planner Server → Path Topic → Path Follower → /cmd_vel → Gazebo Robot
+A custom world ("Gauntlet") was integrated into a ROS2 workspace. The objective was to create a reproducible digital twin of the operating environment.
 
+Key tasks completed:
 
-### Core Components:
-
-- `planner_server.py`  
-  Implements both A* and GVD planning logic.
-
-- `path_follower.py`  
-  Lookahead-based controller for A*.
-
-- `path_follower_gvd.py`  
-  Sequential waypoint controller for GVD.
-
-- `gauntlet_nav.launch.py`  
-  Launch orchestration and planner selection.
+- Custom world integration in Gazebo
+- ROS2 workspace configuration
+- Proper frame tree validation in RViz
+- Verification of `/odom`, `/scan`, and `/tf` pipelines
 
 ---
 
-## 4. Planner Implementations
+### 2.2 SLAM-Based Map Generation
 
-### 4.1 A* Planner
+To solve the **Blind Robot Problem**, a complete occupancy grid map was generated using online SLAM.
 
-The A* algorithm was implemented manually using:
+Process:
 
-- 8-connected grid expansion
-- Euclidean heuristic
-- Priority queue (`heapq`)
-- Manual `g` and `f` cost tracking
-- Path reconstruction via parent mapping
+1. Teleoperation of TurtleBot3 in simulation
+2. Real-time mapping via SLAM toolbox
+3. Loop-closure validation
+4. Map export to:
 
-Key properties:
+gauntlet_map.pgm
+gauntlet_map.yaml
 
-- Guarantees shortest path
-- Efficient node expansion
-- Sharp turns in narrow regions
-- May approach obstacles closely
 
----
-
-### 4.2 GVD Planner
-
-The GVD planner generates a medial-axis skeleton of the free space.
-
-Core characteristics:
-
-- Maximizes obstacle clearance
-- Produces safer but longer trajectories
-- Especially effective in corridor-like environments
-- Generates higher curvature paths
-
-The implementation focuses on extracting safe centerlines from the occupancy grid and publishing them as a `nav_msgs/Path`.
+The final map was validated for:
+- Closed loops
+- No ghost obstacles
+- Consistent resolution
+- Correct origin alignment
 
 ---
 
-## 5. Path Following Strategies
+### 2.3 Configuration Space Modeling
 
-Two different controllers were designed to match planner behavior.
+The robot is not a point mass; therefore, configuration space (C-Space) modeling was applied.
 
-### A* Controller
+Steps performed:
+
+- Manual measurement of robot radius `r`
+- Application of Minkowski sum concept
+- Obstacle inflation by `(r + δ)` safety margin
+- Visual overlay comparison of:
+  - Raw occupancy grid
+  - Inflated obstacle map
+
+This allowed planners to treat the robot as a point in C-space while preserving collision safety.
+
+---
+
+## 3. Phase II — Dual Planner Implementation
+
+### 3.1 Grid-to-Graph Conversion
+
+The occupancy grid published on `/map` was converted into a graph representation:
+
+- 2D matrix extraction from `OccupancyGrid`
+- 8-connected node expansion
+- Free-space thresholding
+- Boundary checking
+- Index-to-world coordinate transformations
+
+This enabled direct application of graph search algorithms.
+
+---
+
+## 3.2 A* Planner (Optimal Path)
+
+A complete A* implementation was developed from scratch.
+
+Key technical elements:
+
+- Priority queue via `heapq`
+- Explicit `g(n)` and `f(n)` cost tracking
+- Euclidean heuristic for admissibility
+- Parent tracking for path reconstruction
+- Diagonal movement with √2 cost
+- Efficient neighbor expansion
+
+Properties:
+
+- Strict shortest path guarantee
+- Efficient search convergence
+- Aggressive corner cutting near obstacles
+- Minimal travel distance
+
+---
+
+## 3.3 GVD Planner (Medial Axis Planning)
+
+A safety-oriented planner was implemented using a medial-axis approach.
+
+Concept:
+
+- Extract skeleton of free space
+- Maximize clearance from obstacles
+- Follow Voronoi-like centerlines
+
+Characteristics:
+
+- Longer path length
+- Higher minimum obstacle distance
+- Reduced risk in narrow corridors
+- Centered traversal through constrained regions
+
+This planner intentionally prioritizes safety over path optimality.
+
+---
+
+## 4. Planner-Specific Controllers
+
+Distinct controllers were developed to match planner characteristics.
+
+### 4.1 A* Controller
 
 - Lookahead-based tracking
 - Continuous heading correction
-- Smooth motion prioritizing efficiency
+- Smooth motion behavior
+- Efficient trajectory tracking
 
-### GVD Controller
+### 4.2 GVD Controller
 
 - Sequential waypoint tracking
-- Rotate-then-drive behavior
-- Guarantees faithful traversal of medial axis
-- Prioritizes correctness over smoothness
+- Rotate-then-drive strategy
+- Guaranteed traversal of medial axis
+- Robust against high-curvature segments
 
-This distinction highlights that controller design must align with planner characteristics.
-
----
-
-## 6. Experimental Observations
-
-### A* Behavior
-
-- Shortest travel distance
-- Aggressive turns
-- Reduced travel time
-- Lower obstacle clearance
-
-### GVD Behavior
-
-- Longer trajectory
-- Higher obstacle clearance
-- Safer corridor traversal
-- Clear medial-axis alignment
-
-These experiments demonstrate the fundamental trade-off:
-
-> Shortest path ≠ Safest path
+Controller-planner coupling was critical to ensure faithful path execution.
 
 ---
 
-## 7. Engineering Challenges Solved
+## 5. System Architecture
 
-During development, several system-level issues were resolved:
+nav2_map_server → planner_server → /planned_path → path_follower → /cmd_vel → Gazebo
+
+
+Core Nodes:
+
+- `planner_server.py`
+- `path_follower.py`
+- `path_follower_gvd.py`
+- `gauntlet_nav.launch.py`
+
+Planner selection is handled at launch via parameter:
+
+planner_type:=astar
+planner_type:=gvd
+
+
+---
+
+## 6. Comparative Observations
+
+### A*
+
+- Shortest path length
+- Lower time-to-goal
+- Minimal clearance
+- Sharp turns
+
+### GVD
+
+- Longer path
+- Increased obstacle clearance
+- Stable corridor traversal
+- More conservative motion
+
+The experiments confirm:
+
+> Optimality and safety are competing objectives in mobile robot navigation.
+
+---
+
+## 7. Engineering Challenges Resolved
+
+During development, several non-trivial system-level issues were addressed:
 
 - ROS2 QoS mismatch between Gazebo and subscribers
-- Lifecycle-managed Map Server configuration
-- Repeated path publishing causing follower reset loops
-- Controller oscillations at high-curvature turns
+- Lifecycle-based Map Server activation
+- Path republishing causing controller reset loops
+- Heading oscillation at high-curvature turns
 - Synchronization of planner execution timing
+- Frame alignment between `map`, `odom`, and `base_link`
 
-Each issue required debugging across multiple ROS2 subsystems including lifecycle management, QoS policies, and node orchestration.
-
----
-
-## 8. Technologies Used
-
-- ROS2 Humble (rclpy)
-- Gazebo Simulation
-- nav2_map_server
-- RViz2
-- TurtleBot3
-- Python
-- Occupancy Grid Mapping
+These debugging phases significantly improved system robustness.
 
 ---
 
-## 9. How to Run
+## 8. How to Run
 
-### Build the workspace
+### Build
 
 ```bash
 cd ~/ros2_ws
 colcon build
 source install/setup.bash
 ```
-
-Launch with A*
+Launch A*
 ```
 ros2 launch gauntlet_sim gauntlet_nav.launch.py planner_type:=astar
 ```
-Launch with GVD
+Launch GVD
 ```
 ros2 launch gauntlet_sim gauntlet_nav.launch.py planner_type:=gvd
 ```
-10. Key Learnings
+9. Current Development Stage
 
-    * Optimality and safety are competing objectives in navigation.
+Completed:
 
-    * Controller strategy must be tailored to planner characteristics.
+    * Simulation environment
 
-    * Medial-axis planning improves robustness in constrained spaces.
+    * SLAM-based map generation
 
-    * ROS2 lifecycle and QoS configuration are critical for stable system behavior.
+    * Configuration space modeling
 
-    * Debugging distributed robotic systems requires cross-layer understanding.
+    * A* implementation
 
-11. Future Improvements
+    * GVD implementation
 
-    * Add RRT or sampling-based planner comparison
+    * Planner-specific controllers
 
-    * Implement dynamic obstacle avoidance
+    * Planner selection at runtime
 
-    * Add curvature-aware smoothing
+10. Planned Future Extensions
 
-    * Quantitatively measure clearance vs. distance trade-offs
+The system will be extended with:
 
-    * Integrate costmaps and dynamic replanning
+    Hardware deployment on physical TurtleBot
+
+    AMCL-based localization for odometry drift correction
+
+    Inflation radius tuning for real-world imperfections
+
+    Controller parameter optimization under sensor noise
+
+    Quantitative comparison:
+
+        Path length
+
+        Time to goal
+
+        Minimum obstacle clearance
+
+    Multiple-run statistical evaluation
+
+    Sim-to-real gap analysis
+
+11. Technologies Used
+
+    * ROS2 (rclpy)
+
+    * Gazebo
+
+    * nav2_map_server
+
+    * SLAM Toolbox
+
+    * RViz2
+
+    * Python
+
+    * Occupancy Grid Mapping
+
+    * Graph Search Algorithms
 
 12. Author
 
 Ayush Bhaskar
-Mechanical Engineering
+Autonomous Systems & Robotics
 IIT Bombay
-
-Areas of Interest:
-
-    Autonomous Systems
-
-    UAV Navigation
-
-    Robotics Control
-
-    Intelligent Mobility Systems
